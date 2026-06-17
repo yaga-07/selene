@@ -1,0 +1,32 @@
+==============================================================================
+product            : ch2_ohr_nrp_20211223T0019163816_d_img_d32
+img dims           : 79795 x 12000 (957.5 MB on disk)
+bits_selection     : mid
+tdi_stages         : TDI256
+line_exposure      : 205.320 ms
+spacecraft_altitude: 108.60 km
+pixel_resolution   : 0.28 m/pix
+solar_incidence    : 84.894529 deg
+dark band rows     : 30666 .. 34762
+verdict            : USABLE -- dark-band mean DN=8.69, 99.9% of mass in DN 2..25. Low-signal detail preserved.
+plot               : /Users/yashgajjar/workspace/yash/selene/analysis/ch2_ohr_nrp_20211223T0019163816_d_img_d32_diagnostic.png
+DN<=2 count (full)   : 77327
+DN<=2 count (dark)   : 77230
+DN 3..25 count (dark): 49070673
+DN>=250 count (full) : 971966
+==============================================================================
+product            : ch2_ohr_nrp_20211222T2023166276_d_img_d32
+img dims           : 90148 x 12000 (1081.8 MB on disk)
+bits_selection     : mid
+tdi_stages         : TDI256
+line_exposure      : 181.740 ms
+spacecraft_altitude: 109.14 km
+pixel_resolution   : 0.28 m/pix
+solar_incidence    : 83.729354 deg
+dark band rows     : 35970 .. 40066
+verdict            : USABLE -- dark-band mean DN=6.09, 99.7% of mass in DN 2..25. Low-signal detail preserved.
+plot               : /Users/yashgajjar/workspace/yash/selene/analysis/ch2_ohr_nrp_20211222T2023166276_d_img_d32_diagnostic.png
+DN<=2 count (full)   : 208430
+DN<=2 count (dark)   : 149741
+DN 3..25 count (dark): 48994067
+DN>=250 count (full) : 153192

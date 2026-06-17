@@ -1,0 +1,26 @@
+# SELENE — Python deps for Gate 0/1 (catalog + diagnostics).
+# Heavy ML deps (torch, etc.) deferred until Gate 3.
+
+# Catalog index + analysis
+numpy
+pandas>=2.0
+pyarrow>=12.0
+
+# Optional SQL backend for `python -m catalog sql ...`
+duckdb
+
+# Spatial geometry (used by polygon recipes; the arc-based bbox in
+# catalog.geometry has no shapely dependency)
+shapely>=2.0
+
+# Stats and PTC fits in later gates
+scipy
+
+# Figures and quick-look plots
+matplotlib
+
+# Tests
+pytest
+
+# Notebooks for ad-hoc analysis
+jupyterlab

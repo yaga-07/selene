@@ -1,0 +1,36 @@
+# --- Project-local data and internal docs ---
+# Internal planning / research docs. These contain in-flight decisions
+# and personal context — kept locally, not committed.
+docs/
+
+# Raw OHRC data and sample products. The full corpus lives on an
+# external SSD; the few sample products under data/ are also kept out
+# of the repo to keep the public clone small.
+data/
+
+# Built catalog index and per-build metadata.
+catalog/_index/
+
+# Analysis artefacts: the per-strip jsonl tables are bulky and
+# rebuildable, but the diagnostic PNGs and short text reports are kept
+# in the repo as they back up the published findings.
+analysis/*.jsonl
+
+# --- Python ---
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- OS / editor ---
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# --- Misc ---
+*.log
+
+CLAUDE.md

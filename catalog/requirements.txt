@@ -1,0 +1,6 @@
+pandas>=2.0
+pyarrow>=12.0
+# Optional: install separately to enable `python -m catalog sql ...`
+# duckdb>=0.10
+# Optional: only needed for the polygon-geometry recipe in examples/queries.py
+# shapely>=2.0

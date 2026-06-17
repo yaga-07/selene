@@ -1,0 +1,38 @@
+product            : ch2_ohr_nrp_20251007T0502258606_d_img_d18
+bits_selection     : msb
+tdi_stages         : TDI64
+solar_incidence    : 90.003007 deg
+dark band rows     : 0 .. 4096
+DN<=2 count (dark) : 48818100
+DN 3..25 count (dark): 333900
+DN 26..63 count (dark): 0
+DN<=2 count (full) : 12630843
+DN>=250 count (full): 6575
+verdict            : CRUSHED -- 99.3% of dark-band pixels at DN<=2, mean DN=1.36. Data not usable for PSR work.
+plot               : /Users/yashgajjar/workspace/yash/selene/analysis/ch2_ohr_nrp_20251007T0502258606_d_img_d18_diagnostic.png
+
+product            : ch2_ohr_nrp_20240229T0921574793_d_img_d18
+bits_selection     : msb
+tdi_stages         : TDI64
+solar_incidence    : 90.027513 deg
+dark band rows     : 72750 .. 76846
+DN<=2 count (dark) : 47511542
+DN 3..25 count (dark): 1640458
+DN 26..63 count (dark): 0
+DN<=2 count (full) : 14949874
+DN>=250 count (full): 0
+verdict            : CRUSHED -- 96.7% of dark-band pixels at DN<=2, mean DN=1.13. Data not usable for PSR work.
+plot               : /Users/yashgajjar/workspace/yash/selene/analysis/ch2_ohr_nrp_20240229T0921574793_d_img_d18_diagnostic.png
+
+product            : ch2_ohr_nrp_20240229T0921593215_d_img_d18
+bits_selection     : msb
+tdi_stages         : TDI64
+solar_incidence    : 90.027513 deg
+dark band rows     : 72750 .. 76846
+DN<=2 count (dark) : 47511542
+DN 3..25 count (dark): 1640458
+DN 26..63 count (dark): 0
+DN<=2 count (full) : 14949874
+DN>=250 count (full): 0
+verdict            : CRUSHED -- 96.7% of dark-band pixels at DN<=2, mean DN=1.13. Data not usable for PSR work.
+plot               : /Users/yashgajjar/workspace/yash/selene/analysis/ch2_ohr_nrp_20240229T0921593215_d_img_d18_diagnostic.png
