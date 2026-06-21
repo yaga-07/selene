@@ -15,6 +15,7 @@ shapely>=2.0
 
 # Stats and PTC fits in later gates
 scipy
+scikit-learn
 
 # Figures and quick-look plots
 matplotlib
