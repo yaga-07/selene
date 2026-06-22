@@ -103,6 +103,26 @@ def test_inject_noise_respects_bits_selection() -> None:
     assert noisy_lsb.std() > noisy_msb.std()
 
 
+def test_fpn_template_carries_provenance_meta() -> None:
+    """Regenerated templates must embed provenance metadata so the (cutoff,
+    dedup flag, n_strips, git sha) that produced them is recoverable from
+    the artifact alone. See feedback memory `feedback-data-provenance`."""
+    tpl = nm.load_fpn_template("msb", tdi_stages=64)
+    assert tpl.meta is not None, (
+        "MSB TDI64 template has no embedded meta — regenerate with the "
+        "current extract_noise_params.py (which writes a json-encoded meta "
+        "field) before relying on this template."
+    )
+    assert tpl.meta["schema_version"] >= 1
+    assert {"generation_utc", "script_path", "git_sha", "params", "inputs"} <= set(tpl.meta)
+    params = tpl.meta["params"]
+    assert params["bits_selection"] == "msb"
+    assert params["tdi_stages"] == "TDI64"
+    inputs = tpl.meta["inputs"]
+    assert inputs["n_strips_included"] == tpl.n_strips
+    assert len(inputs["included_product_ids"]) == tpl.n_strips
+
+
 def test_inject_noise_with_fpn_template_adds_column_structure() -> None:
     """With the measured FPN template loaded, injected noise must have
     non-trivial column-direction structure (mean-of-column variance) on a

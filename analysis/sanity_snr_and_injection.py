@@ -116,6 +116,19 @@ def plot_inject_examples() -> Path:
     # Flat reference removes scene confusion; full width captures the entire
     # bias profile including the periodic spikes seen in bias_profile_lsb_TDI64.png.
     cmp_mode, cmp_tdi = "lsb", 64
+    cmp_tpl = nm.load_fpn_template(cmp_mode, cmp_tdi)
+    if cmp_tpl.meta:
+        m = cmp_tpl.meta
+        print(
+            f"FPN template ({cmp_mode}, TDI{cmp_tdi}) provenance: "
+            f"generated {m['generation_utc']} | "
+            f"git {(m['git_sha'] or 'unknown')[:8]}{'-dirty' if m.get('git_dirty') else ''} | "
+            f"n_strips {m['inputs']['n_strips_included']}/{m['inputs']['n_strips_processed']} | "
+            f"cutoff {m['params']['mode_shadow_cutoff_dn']:.2f} DN | "
+            f"only_psr={m['params']['only_psr']} unique_obs={m['params']['unique_obs']}"
+        )
+    else:
+        print(f"FPN template ({cmp_mode}, TDI{cmp_tdi}) has no embedded provenance meta")
     flat_ref = np.full((512, 12000), 30.0, dtype=np.float32)
     seed = 99
     noisy_with = nm.inject_noise(
@@ -163,7 +176,19 @@ def plot_inject_examples() -> Path:
                      fontsize=10)
     ax2[3].grid(True, alpha=0.3)
     ax2[3].legend(loc="upper right", fontsize=9)
-    fig2.tight_layout()
+    if cmp_tpl.meta:
+        m = cmp_tpl.meta
+        fig2.suptitle(
+            f"FPN template ({cmp_mode}, TDI{cmp_tdi}) — "
+            f"n_strips={m['inputs']['n_strips_included']} | "
+            f"cutoff={m['params']['mode_shadow_cutoff_dn']:.2f} DN | "
+            f"only_psr={m['params']['only_psr']} unique_obs={m['params']['unique_obs']} | "
+            f"git {(m['git_sha'] or 'unknown')[:8]} {m['generation_utc']}",
+            fontsize=9,
+        )
+        fig2.tight_layout(rect=(0, 0, 1, 0.97))
+    else:
+        fig2.tight_layout()
     cmp_out = OUT_DIR / "inject_noise_fpn_comparison.png"
     fig2.savefig(cmp_out, dpi=110)
     plt.close(fig2)

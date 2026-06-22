@@ -36,8 +36,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
+import subprocess
 import sys
 from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -51,6 +54,58 @@ import noise_model as nm  # noqa: E402
 
 OUT_DIR = REPO / "analysis" / "_outputs"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+SCRIPT_REL_PATH = "analysis/extract_noise_params.py"
+META_SCHEMA_VERSION = 1
+
+
+def _git_sha() -> str | None:
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=REPO, capture_output=True, text=True, check=True, timeout=5,
+        )
+        return out.stdout.strip() or None
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return None
+
+
+def _git_dirty() -> bool | None:
+    try:
+        out = subprocess.run(
+            ["git", "status", "--porcelain", "--", SCRIPT_REL_PATH],
+            cwd=REPO, capture_output=True, text=True, check=True, timeout=5,
+        )
+        return bool(out.stdout.strip())
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return None
+
+
+def _build_meta(args, mode: str, n_tdi_label: str, mode_cutoff: float,
+                processed_ids: list[str], included_ids: list[str]) -> dict:
+    return {
+        "schema_version": META_SCHEMA_VERSION,
+        "generation_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "script_path": SCRIPT_REL_PATH,
+        "git_sha": _git_sha(),
+        "git_dirty": _git_dirty(),
+        "params": {
+            "bits_selection": mode,
+            "tdi_stages": n_tdi_label,
+            "max_shadow_mean_dn_arg": float(args.max_shadow_mean_dn),
+            "mode_shadow_cutoff_dn": float(mode_cutoff),
+            "row_quantile": float(args.row_quantile),
+            "only_psr": bool(args.only_psr),
+            "unique_obs": bool(args.unique_obs),
+            "max_strips_per_mode": int(args.max_strips_per_mode),
+        },
+        "inputs": {
+            "n_strips_processed": len(processed_ids),
+            "n_strips_included": len(included_ids),
+            "processed_product_ids": sorted(processed_ids),
+            "included_product_ids": sorted(included_ids),
+        },
+    }
 
 
 @dataclass
@@ -197,6 +252,8 @@ def main() -> int:
     per_mode_records: list[dict] = []
     col_mean_buffer: dict[tuple[str, str], list[np.ndarray]] = {}
     col_std_buffer: dict[tuple[str, str], list[np.ndarray]] = {}
+    processed_ids_buffer: dict[tuple[str, str], list[str]] = {}
+    included_ids_buffer: dict[tuple[str, str], list[str]] = {}
 
     mode_cutoff = {
         "lsb": args.max_shadow_mean_dn,
@@ -220,6 +277,8 @@ def main() -> int:
             mode_key = (mode, n_tdi_label)
             col_mean_buffer.setdefault(mode_key, [])
             col_std_buffer.setdefault(mode_key, [])
+            processed_ids_buffer.setdefault(mode_key, [])
+            included_ids_buffer.setdefault(mode_key, [])
 
             cutoff = mode_cutoff[mode]
             for _, row in picks.iterrows():
@@ -233,9 +292,11 @@ def main() -> int:
                 rec["included_in_aggregate"] = bool(included)
                 rec["shadow_cutoff_dn"] = float(cutoff)
                 per_strip_records.append(rec)
+                processed_ids_buffer[mode_key].append(stats.product_id)
                 if included:
                     col_mean_buffer[mode_key].append(col_mean)
                     col_std_buffer[mode_key].append(col_std)
+                    included_ids_buffer[mode_key].append(stats.product_id)
                 flag = "" if included else "  [EXCLUDED — no real shadow]"
                 print(
                     f"  · {stats.product_id}: "
@@ -272,12 +333,18 @@ def main() -> int:
             )
 
             # Save full per-column arrays as a .npz for downstream use.
+            meta = _build_meta(
+                args, mode, n_tdi_label, cutoff,
+                processed_ids=processed_ids_buffer[mode_key],
+                included_ids=included_ids_buffer[mode_key],
+            )
             np.savez_compressed(
                 OUT_DIR / f"bias_arrays_{mode}_{n_tdi_label}.npz",
                 bias_profile=bias_profile,
                 sigma_fpn=sigma_fpn,
                 within_noise=within_noise,
                 n_strips=stack_mean.shape[0],
+                meta=np.array(json.dumps(meta)),  # 0-d unicode array; no pickle needed
             )
 
             # Diagnostic PNG.

@@ -23,8 +23,10 @@ docs/NOISE_MODEL.md §3 for how they enter the forward model.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -40,6 +42,7 @@ class FPNTemplate:
     sigma_fpn: np.ndarray      # (n_cols,), DN
     within_noise: np.ndarray   # (n_cols,), DN
     n_strips: int
+    meta: dict[str, Any] | None = field(default=None)
 
     @property
     def n_cols(self) -> int:
@@ -86,6 +89,12 @@ def load_fpn_template(bits_selection: str, tdi_stages: int,
             "inject_noise(..., fpn_template=None) to disable measured-FPN injection."
         )
     z = np.load(path)
+    meta: dict[str, Any] | None = None
+    if "meta" in z.files:
+        try:
+            meta = json.loads(str(z["meta"].item()))
+        except (json.JSONDecodeError, ValueError):
+            meta = None
     return FPNTemplate(
         bits_selection=bits_selection.lower(),
         tdi_stages=int(tdi_stages),
@@ -93,4 +102,5 @@ def load_fpn_template(bits_selection: str, tdi_stages: int,
         sigma_fpn=z["sigma_fpn"].astype(np.float32),
         within_noise=z["within_noise"].astype(np.float32),
         n_strips=int(z["n_strips"]),
+        meta=meta,
     )
