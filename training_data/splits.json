@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "generation_utc": "2026-06-22T17:01:11+00:00",
+  "git_sha": "8f2bd4d82c8f3487b90966bf19e11944450ca1d9",
+  "git_dirty": true,
+  "catalog_index_sha256": "990f0fcb742e5a6b4a0f25b6f3a6e7baea40e498ffac8ae0cc269436cd4e14b0",
+  "params": {
+    "random_seed": 42,
+    "val_fraction": 0.15,
+    "stratify_by": "bits_selection",
+    "eligible_pool_filter": "area == 'Equatorial'",
+    "test_lock_source": "training_data/splits.py:LOCKED_TEST_STRIPS"
+  },
+  "test": {
+    "cabeus_overlap_pair": [
+      "ch2_ohr_nrp_20211222T2023166276_d_img_d32",
+      "ch2_ohr_nrp_20211223T0019163816_d_img_d32"
+    ],
+    "polar_held_out": [
+      "ch2_ohr_nrp_20241118T1613209337_d_img_d18",
+      "ch2_ohr_nrp_20250228T0429255172_d_img_d18"
+    ],
+    "equatorial_held_out": [
+      "ch2_ohr_nrp_20210405T1606537227_d_img_d18",
+      "ch2_ohr_nrp_20240330T0035085365_d_img_d18"
+    ]
+  },
+  "train": [
+    "ch2_ohr_nrp_20190906T1246532096_d_img_d18",
+    "ch2_ohr_nrp_20210331T2033243734_d_img_d18",
+    "ch2_ohr_nrp_20210401T2200364910_d_img_d18",
+    "ch2_ohr_nrp_20210401T2357376656_d_img_d18",
+    "ch2_ohr_nrp_20210401T2357376656_d_img_hw1",
+    "ch2_ohr_nrp_20210402T0155096873_d_img_d18",
+    "ch2_ohr_nrp_20210402T0546284043_d_img_d18",
+    "ch2_ohr_nrp_20210405T1606536730_d_img_d18",
+    "ch2_ohr_nrp_20220320T2133025866_d_img_d18",
+    "ch2_ohr_nrp_20220320T2331416822_d_img_d18",
+    "ch2_ohr_nrp_20220321T0326368312_d_img_hw1",
+    "ch2_ohr_nrp_20220321T0326369085_d_img_d18",
+    "ch2_ohr_nrp_20220321T0525225877_d_img_hw1",
+    "ch2_ohr_nrp_20220321T0525226030_d_img_d18",
+    "ch2_ohr_nrp_20220321T0525226107_d_img_d18",
+    "ch2_ohr_nrp_20220321T0525382085_d_img_hw1",
+    "ch2_ohr_nrp_20220914T0835371412_d_img_d32",
+    "ch2_ohr_nrp_20220914T1033119094_d_img_d32",
+    "ch2_ohr_nrp_20230820T0559124374_d_img_n18",
+    "ch2_ohr_nrp_20240316T0457443193_d_img_d18",
+    "ch2_ohr_nrp_20250516T0948068899_d_img_d18",
+    "ch2_ohr_nrp_20250516T1145499313_d_img_d18",
+    "ch2_ohr_nrp_20250516T1342347288_d_img_d18",
+    "ch2_ohr_nrp_20250516T1540191774_d_img_d18",
+    "ch2_ohr_nrp_20250612T2031048828_d_img_d18",
+    "ch2_ohr_nrp_20260330T2317474369_d_img_d18",
+    "ch2_ohr_nrp_20260331T0116042688_d_img_d18",
+    "ch2_ohr_nrp_20260331T1105235288_d_img_d18"
+  ],
+  "val": [
+    "ch2_ohr_nrp_20220321T0326369860_d_img_d18",
+    "ch2_ohr_nrp_20220321T0525376958_d_img_hw1",
+    "ch2_ohr_nrp_20230302T1959055531_d_img_n18",
+    "ch2_ohr_nrp_20231004T0406038822_d_img_d18",
+    "ch2_ohr_nrp_20250612T2229094979_d_img_d18",
+    "ch2_ohr_nrp_20260331T0907044475_d_img_d18"
+  ]
+}
