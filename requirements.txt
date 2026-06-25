@@ -1,10 +1,14 @@
-# SELENE — Python deps for Gate 0/1 (catalog + diagnostics).
-# Heavy ML deps (torch, etc.) deferred until Gate 3.
+# SELENE — Python deps for Gate 0/1/2 (catalog + diagnostics) plus
+# the Phase-2 PyTorch Dataset wrapper. Torch is host-side for sanity
+# runs on Apple-Silicon MPS; the full trainer lives in Phase 3 on Colab.
 
 # Catalog index + analysis
 numpy
 pandas>=2.0
 pyarrow>=12.0
+
+# Phase-2 PyTorch Dataset (host-side sanity; full trainer is Phase-3 scope)
+torch>=2.12
 
 # Optional SQL backend for `python -m catalog sql ...`
 duckdb

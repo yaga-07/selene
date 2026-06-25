@@ -16,6 +16,11 @@ catalog/_index/
 # in the repo as they back up the published findings.
 analysis/*.jsonl
 
+# Colab/Kaggle patch bundles — derived from reference_manifest.parquet,
+# ~22 GB and regeneratable via training_data/bundle_for_colab.py.
+training_data/patches.npy
+training_data/patches.meta.json
+
 # --- Python ---
 .venv/
 __pycache__/

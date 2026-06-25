@@ -1,0 +1,1 @@
+2026-06-25T16:58:25+00:00  split=train  n= 200  warmup= 32  seed=  0  min=  1.13ms  median= 80.36ms  p95= 98.31ms  max= 100.05ms  gate(<50ms)=FAIL
