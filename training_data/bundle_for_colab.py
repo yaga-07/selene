@@ -167,7 +167,11 @@ def build(out_path: Path, meta_path: Path) -> None:
         "elapsed_seconds": round(elapsed, 1),
     }
     meta_path.write_text(json.dumps(out_meta, indent=2) + "\n")
-    print(f"wrote {meta_path.relative_to(REPO_ROOT)}")
+    try:
+        meta_display = meta_path.relative_to(REPO_ROOT)
+    except ValueError:
+        meta_display = meta_path
+    print(f"wrote {meta_display}")
 
 
 def verify(out_path: Path, k: int, seed: int) -> None:
