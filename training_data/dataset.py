@@ -39,7 +39,6 @@ import pyarrow.parquet as pq
 import torch
 from torch.utils.data import Dataset
 
-import catalog
 from noise_model import (
     PRNU_FRAC,
     inject_noise,
@@ -57,6 +56,7 @@ DEFAULT_SIM_TDI_PROBS: dict[int, float] = {64: 0.7, 128: 0.3}
 # Module-level caches — each forked DataLoader worker has its own copy.
 _MEMMAP_CACHE: dict[str, np.memmap] = {}
 _FPN_CACHE: dict[tuple[str, int], object] = {}
+_BUNDLE_CACHE: dict[Path, np.memmap] = {}
 
 
 def _get_memmap(pid: str, strip_meta: dict) -> np.memmap:
@@ -80,8 +80,22 @@ def _get_fpn(bits: str, tdi: int):
     return tmpl
 
 
+def _get_bundle(bundle_path: Path) -> np.memmap:
+    """Cached mmap of the Colab patches.npy bundle (per-worker)."""
+    arr = _BUNDLE_CACHE.get(bundle_path)
+    if arr is None:
+        arr = np.load(bundle_path, mmap_mode="r")
+        _BUNDLE_CACHE[bundle_path] = arr
+    return arr
+
+
 def strip_meta_from_catalog() -> dict[str, dict]:
-    """Build {product_id: {img_path, lines, samples}} from the catalog."""
+    """Build {product_id: {img_path, lines, samples}} from the catalog.
+
+    Imported lazily so the Colab path (which has no `catalog/_index/`)
+    doesn't trigger a `catalog.load()` it can't satisfy.
+    """
+    import catalog  # noqa: PLC0415 — lazy, see docstring
     cat = catalog.load()
     meta_df = cat.set_index("product_id")[["img_path", "line_count", "sample_count"]]
     return {
@@ -102,6 +116,7 @@ class OHRCReferenceDataset(Dataset):
         split: str,
         *,
         manifest_path: Path = DEFAULT_MANIFEST,
+        bundle_path: Path | None = None,
         seed: int = 0,
         alpha_log_range: tuple[float, float] = DEFAULT_ALPHA_LOG_RANGE,
         sim_bits_probs: dict[str, float] | None = None,
@@ -109,10 +124,22 @@ class OHRCReferenceDataset(Dataset):
         deterministic: bool = False,
         strip_meta: dict[str, dict] | None = None,
     ) -> None:
+        """
+        bundle_path:
+            If given, read clean patches from the pre-baked ``patches.npy``
+            via ``bundle[manifest_idx]`` and bypass the catalog/memmap path
+            entirely (Colab path — no SSD, no ``catalog/_index/``).
+            ``bundle[i]`` must equal ``manifest`` row ``i`` (held by
+            ``training_data/bundle_for_colab.py``).
+        """
         if split not in {"train", "val"}:
             raise ValueError(f"split must be 'train' or 'val'; got {split!r}")
 
         df = pq.read_table(manifest_path).to_pandas()
+        # Preserve the full-manifest position as `manifest_idx`. The bundle
+        # is indexed by this (bundle[i] == manifest row i), so per-split
+        # idx → manifest_idx → bundle row.
+        df = df.reset_index().rename(columns={"index": "manifest_idx"})
         self.df = df[df["split"] == split].reset_index(drop=True)
         if len(self.df) == 0:
             raise ValueError(
@@ -121,6 +148,11 @@ class OHRCReferenceDataset(Dataset):
 
         self.split = split
         self.manifest_path = Path(manifest_path)
+        self.bundle_path = Path(bundle_path) if bundle_path is not None else None
+        if self.bundle_path is not None and not self.bundle_path.exists():
+            raise FileNotFoundError(
+                f"bundle_path does not exist: {self.bundle_path}"
+            )
         self.seed = int(seed)
         self.alpha_log_range = tuple(alpha_log_range)
         self.deterministic = bool(deterministic)
@@ -151,6 +183,14 @@ class OHRCReferenceDataset(Dataset):
         return len(self.df)
 
     def _strips(self) -> dict[str, dict]:
+        """Resolve per-strip memmap metadata. NEVER called on the bundle
+        path — that path skips the catalog entirely so Colab clones
+        without ``catalog/_index/`` still work."""
+        if self.bundle_path is not None:
+            raise RuntimeError(
+                "_strips() called on bundle-mode Dataset — should not happen; "
+                "bundle path reads bundle[manifest_idx] directly."
+            )
         if self._strip_meta_resolved is None:
             self._strip_meta_resolved = (
                 self._strip_meta_override
@@ -169,10 +209,15 @@ class OHRCReferenceDataset(Dataset):
         source_bits = str(row["source_bits"])
         source_tdi = int(row["source_tdi"])
 
-        arr = _get_memmap(pid, self._strips())
-        ref_uint8 = np.asarray(
-            arr[r0:r0 + PATCH_SIZE, c0:c0 + PATCH_SIZE]
-        )
+        if self.bundle_path is not None:
+            manifest_idx = int(row["manifest_idx"])
+            bundle = _get_bundle(self.bundle_path)
+            ref_uint8 = np.asarray(bundle[manifest_idx])
+        else:
+            arr = _get_memmap(pid, self._strips())
+            ref_uint8 = np.asarray(
+                arr[r0:r0 + PATCH_SIZE, c0:c0 + PATCH_SIZE]
+            )
 
         rng = np.random.default_rng(
             np.random.SeedSequence([self.seed, idx])
@@ -190,6 +235,10 @@ class OHRCReferenceDataset(Dataset):
 
         clean_dn = (alpha * ref_uint8.astype(np.float32))
         fpn_tmpl = _get_fpn(sim_bits, sim_tdi)
+        # Pin the FPN column slice to the patch's source col0 — at inference
+        # on real strips the σ_FPN(c) for a patch IS its actual detector
+        # columns, so training-time parity requires the same. See
+        # docs/PAPER_NOTES.md (FPN train-test parity) for the rationale.
         noisy_dn = inject_noise(
             clean_dn,
             bits_selection=sim_bits,
@@ -197,6 +246,7 @@ class OHRCReferenceDataset(Dataset):
             rng=rng,
             fpn_template=fpn_tmpl,
             prnu_frac=PRNU_FRAC,
+            col_offset=c0,
             clip=True,
         )
 

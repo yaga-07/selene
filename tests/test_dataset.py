@@ -29,12 +29,34 @@ STRIP_W = 4 * PATCH
 
 @pytest.fixture(autouse=True)
 def _reset_module_caches():
-    """Each test starts with empty memmap/FPN caches."""
+    """Each test starts with empty memmap/FPN/bundle caches."""
     ds_mod._MEMMAP_CACHE.clear()
     ds_mod._FPN_CACHE.clear()
+    ds_mod._BUNDLE_CACHE.clear()
     yield
     ds_mod._MEMMAP_CACHE.clear()
     ds_mod._FPN_CACHE.clear()
+    ds_mod._BUNDLE_CACHE.clear()
+
+
+def _build_synth_bundle(manifest_path: Path, strip_meta: dict, out_path: Path) -> Path:
+    """Mimic ``training_data/bundle_for_colab.py`` for a synthetic fixture.
+    ``bundle[i]`` is set from the manifest row at position i — exactly
+    the layout the Colab bundle uses."""
+    df = pq.read_table(manifest_path).to_pandas()
+    n = len(df)
+    bundle = np.lib.format.open_memmap(
+        out_path, mode="w+", dtype=np.uint8, shape=(n, PATCH, PATCH),
+    )
+    for i, row in df.iterrows():
+        info = strip_meta[row["product_id"]]
+        arr = np.memmap(info["img_path"], dtype=np.uint8, mode="r",
+                         shape=(info["lines"], info["samples"]))
+        r0, c0 = int(row["row0"]), int(row["col0"])
+        bundle[i] = arr[r0:r0 + PATCH, c0:c0 + PATCH]
+    bundle.flush()
+    del bundle
+    return out_path
 
 
 def _seed_fake_fpn():
@@ -211,3 +233,71 @@ def test_invalid_probs_raise(tmp_path):
         OHRCReferenceDataset("train", manifest_path=manifest_path,
                              strip_meta=strip_meta,
                              sim_bits_probs={"lsb": 0.3, "msb": 0.5})
+
+
+def test_bundle_path_missing_raises(tmp_path):
+    manifest_path, _ = _make_fixture(tmp_path)
+    _seed_fake_fpn()
+    with pytest.raises(FileNotFoundError, match="bundle_path"):
+        OHRCReferenceDataset("train", manifest_path=manifest_path,
+                             bundle_path=tmp_path / "nope.npy")
+
+
+def test_bundle_path_byte_equivalent_to_catalog_path(tmp_path):
+    """Both paths use the same `clean` source data and the same seeded
+    RNG, so for any idx the (clean, noisy, meta) triples must be
+    byte-identical. This is the Colab-readiness check."""
+    manifest_path, strip_meta = _make_fixture(tmp_path)
+    _seed_fake_fpn()
+    bundle_path = _build_synth_bundle(manifest_path, strip_meta,
+                                       tmp_path / "patches.npy")
+
+    ds_cat = OHRCReferenceDataset("train", manifest_path=manifest_path,
+                                  strip_meta=strip_meta, seed=11)
+    ds_bun = OHRCReferenceDataset("train", manifest_path=manifest_path,
+                                  bundle_path=bundle_path, seed=11)
+
+    assert len(ds_cat) == len(ds_bun)
+    for idx in range(len(ds_cat)):
+        a, b = ds_cat[idx], ds_bun[idx]
+        assert torch.equal(a["clean"], b["clean"]), f"clean diff at idx={idx}"
+        assert torch.equal(a["noisy"], b["noisy"]), f"noisy diff at idx={idx}"
+        for k in ("product_id", "row0", "col0", "source_bits",
+                  "source_tdi", "sim_bits", "sim_tdi", "alpha", "idx"):
+            assert a["meta"][k] == b["meta"][k], f"meta[{k!r}] diff at idx={idx}"
+
+
+def test_bundle_mode_does_not_call_catalog(tmp_path, monkeypatch):
+    """On Colab there is no `catalog/_index/`, so any catalog access on
+    the bundle path would crash. Patch the catalog loader to raise and
+    confirm the bundle path completes a __getitem__ without touching it."""
+    manifest_path, strip_meta = _make_fixture(tmp_path)
+    _seed_fake_fpn()
+    bundle_path = _build_synth_bundle(manifest_path, strip_meta,
+                                       tmp_path / "patches.npy")
+
+    def _refuse(*_a, **_k):
+        raise RuntimeError(
+            "catalog.load() called on bundle-mode Dataset — "
+            "Colab path leak"
+        )
+    monkeypatch.setattr(ds_mod, "strip_meta_from_catalog", _refuse)
+
+    ds = OHRCReferenceDataset("train", manifest_path=manifest_path,
+                              bundle_path=bundle_path, seed=0)
+    _ = ds[0]
+    _ = ds[len(ds) - 1]
+
+
+def test_bundle_mode_strips_method_raises(tmp_path):
+    """The internal _strips() must never be called on the bundle path;
+    raise rather than silently fall back to a catalog call that Colab
+    can't satisfy."""
+    manifest_path, strip_meta = _make_fixture(tmp_path)
+    _seed_fake_fpn()
+    bundle_path = _build_synth_bundle(manifest_path, strip_meta,
+                                       tmp_path / "patches.npy")
+    ds = OHRCReferenceDataset("train", manifest_path=manifest_path,
+                              bundle_path=bundle_path)
+    with pytest.raises(RuntimeError, match="bundle-mode Dataset"):
+        ds._strips()
