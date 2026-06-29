@@ -125,3 +125,26 @@ def test_pg_nll_loss_path_runs(tiny_corpus, tmp_path):
         rows = list(csv.reader(f))
     losses = [float(r[3]) for r in rows[1:]]
     assert all(np.isfinite(losses))
+
+
+def test_config_has_started_at_and_best_meta_written(tiny_corpus, tmp_path):
+    """config.json embeds run start time; best.meta.json sidecar tracks
+    the best.pt save (step/epoch/val_loss/psnr_dark)."""
+    manifest, bundle = tiny_corpus
+    run_dir = tmp_path / "run_meta"
+    train(_cfg(run_dir, manifest, bundle, epochs=1))
+
+    cfg = json.loads((run_dir / "config.json").read_text())
+    assert "started_at" in cfg
+    # ISO-8601 UTC: must parse without explosion.
+    from datetime import datetime
+    datetime.fromisoformat(cfg["started_at"])
+
+    # best.meta.json should exist (a best.pt was saved at first val cycle).
+    meta_path = run_dir / "best.meta.json"
+    assert meta_path.exists()
+    meta = json.loads(meta_path.read_text())
+    for k in ("step", "epoch", "val_loss", "psnr_dark", "saved_at", "started_at", "git_sha"):
+        assert k in meta, f"best.meta.json missing key {k!r}"
+    # Sidecar's started_at should match config.json's started_at.
+    assert meta["started_at"] == cfg["started_at"]

@@ -4,20 +4,23 @@ One run = one loss objective for the whole schedule (no MSE→PG-NLL
 curriculum, dropped 2026-06-28). Each invocation produces an isolated
 ``runs/<run_id>/`` directory with:
 
-  - ``config.json``      — snapshot of CLI args + git SHA + seed
+  - ``config.json``      — snapshot of CLI args + git SHA + started_at
   - ``train_log.csv``    — per-step (step, epoch, lr, loss, time_s)
   - ``val_log.jsonl``    — per-val (step, epoch, val_loss, psnr_dark)
   - ``latest.pt``        — written every ``--ckpt-every`` steps
   - ``best.pt``          — written when val_loss improves
-  - ``samples/``         — denoised PNG triptychs each val eval
+  - ``best.meta.json``   — sidecar with (step, epoch, val_loss, psnr_dark,
+                            saved_at) — rewritten with each best.pt
+  - ``samples/``         — denoised PNG triptychs each val eval, run on a
+                            fixed showcase set spanning val mean_dn
+                            percentiles so terrain texture is visible
 
 **Resume.** Re-running with the same ``--run-dir`` and ``latest.pt``
 present resumes from the last checkpointed step. Model, optimizer,
 scheduler, RNG, and bookkeeping all restore.
 
-**Drive sync (Colab).** ``--drive-mirror`` points at a Drive path; at
-each epoch end the run dir is rsync'd there. Cheap insurance for
-session disconnects.
+**Drive sync (Colab).** ``--drive-mirror`` points at a Drive path; the
+run dir is rsync'd there at every val cadence and again at epoch end.
 
 **PSNR.** Pinned: ``peak=255``, masked by ``clean < dark_threshold``.
 This isolates the low-signal regime that SELENE is designed for.
@@ -40,6 +43,7 @@ import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -144,16 +148,23 @@ def _masked_psnr_dn(
 def _save_sample_pngs(
     noisy: torch.Tensor, clean: torch.Tensor, mu: torch.Tensor,
     out_dir: Path, step: int, n: int,
+    captions: list[str] | None = None,
 ) -> None:
     """Side-by-side noisy/clean/μ triptychs as PNGs. Uses matplotlib if
-    available, falls back to PIL if not."""
+    available, falls back to PIL if not.
+
+    For visual comparability across panels, vmin/vmax is the union range
+    of (clean, μ) per sample — not a fixed 0/255 — so faint texture is
+    actually visible in dark-regime patches.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
+    n = min(n, noisy.shape[0])
+    captions = captions or [""] * n
+
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        # PIL fallback: stack horizontally as one grayscale image.
         from PIL import Image
-        n = min(n, noisy.shape[0])
         for i in range(n):
             row = []
             for t in (noisy[i, 0], clean[i, 0], mu[i, 0]):
@@ -163,23 +174,87 @@ def _save_sample_pngs(
             Image.fromarray(strip).save(out_dir / f"step{step:08d}_s{i}.png")
         return
 
-    n = min(n, noisy.shape[0])
     for i in range(n):
-        fig, axes = plt.subplots(1, 3, figsize=(9, 3))
+        c = clean[i, 0].detach().cpu().numpy()
+        nimg = noisy[i, 0].detach().cpu().numpy()
+        m = mu[i, 0].detach().cpu().numpy()
+        # Adaptive scale to whichever of (clean, μ) covers the wider
+        # dynamic range — keeps the comparison fair while preventing
+        # dark patches from rendering pure black.
+        vmin = float(min(c.min(), m.min(), nimg.min()))
+        vmax = float(max(c.max(), m.max(), nimg.max()))
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+        fig, axes = plt.subplots(1, 3, figsize=(9, 3.2))
         for ax, t, title in zip(
-            axes,
-            (noisy[i, 0], clean[i, 0], mu[i, 0]),
-            ("noisy", "clean", "μ (denoised)"),
+            axes, (nimg, c, m), ("noisy", "clean", "μ (denoised)"),
         ):
-            arr = t.detach().cpu().numpy()
-            im = ax.imshow(arr, cmap="gray", vmin=0, vmax=255)
-            ax.set_title(f"{title}\nmean={arr.mean():.1f} DN")
+            im = ax.imshow(t, cmap="gray", vmin=vmin, vmax=vmax)
+            ax.set_title(
+                f"{title}\nmean={t.mean():.1f}  "
+                f"range=[{t.min():.1f},{t.max():.1f}]"
+            )
             ax.axis("off")
             fig.colorbar(im, ax=ax, fraction=0.046)
-        fig.suptitle(f"step {step}  sample {i}")
+        suptitle = f"step {step}  sample {i}"
+        if captions[i]:
+            suptitle += f"  —  {captions[i]}"
+        fig.suptitle(suptitle)
         fig.tight_layout()
         fig.savefig(out_dir / f"step{step:08d}_s{i}.png", dpi=80)
         plt.close(fig)
+
+
+def _pick_showcase_indices(
+    val_df, n: int, percentiles: tuple[float, ...] | None = None,
+) -> list[int]:
+    """Pick ``n`` per-split val idxs spanning the val ``mean_dn``
+    distribution, so sample PNGs show a mix of dark / mid / bright
+    terrain rather than only the first few rows of the val parquet.
+
+    If ``mean_dn`` is missing or constant, falls back to evenly-spaced
+    idxs across the df.
+    """
+    if percentiles is None:
+        percentiles = tuple(np.linspace(15, 95, n))
+    if "mean_dn" not in val_df.columns or val_df["mean_dn"].nunique() < 2:
+        return [int(i) for i in np.linspace(0, len(val_df) - 1, n).round()]
+    qs = val_df["mean_dn"].quantile([p / 100 for p in percentiles]).values
+    idxs: list[int] = []
+    for q in qs:
+        i = int((val_df["mean_dn"] - q).abs().idxmin())
+        idxs.append(i)
+    return idxs
+
+
+def _build_showcase_batch(
+    manifest_path: Path, bundle_path: Path | None, val_seed: int,
+    n: int,
+) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
+    """Pre-build the (clean, noisy) tensors for the sample-PNG set.
+
+    Uses ``deterministic=True`` so each chosen patch is shown at its
+    natural α=1.0 brightness with ``sim_mode = source_mode`` — i.e. the
+    network is evaluated against the same source mode as the patch, with
+    no artificial dimming. Captures real texture quality at every
+    illumination level.
+    """
+    ds_det = OHRCReferenceDataset(
+        split="val", manifest_path=manifest_path,
+        bundle_path=bundle_path, seed=val_seed, deterministic=True,
+    )
+    idxs = _pick_showcase_indices(ds_det.df, n)
+    cleans, noisies, captions = [], [], []
+    for i in idxs:
+        item = ds_det[i]
+        cleans.append(item["clean"])
+        noisies.append(item["noisy"])
+        m = item["meta"]
+        captions.append(
+            f"idx={i}  {m['source_bits']}/TDI{m['source_tdi']}  "
+            f"clean_mean={float(item['clean'].mean()):.1f} DN"
+        )
+    return torch.stack(cleans), torch.stack(noisies), captions
 
 
 def _mirror_to_drive(run_dir: Path, drive_path: Path) -> None:
@@ -213,6 +288,24 @@ def _save_ckpt(
     tmp.replace(path)  # atomic on POSIX
 
 
+def _save_best_meta(
+    path: Path, step: int, epoch: int, val_loss: float, psnr_dark: float,
+    wall_s: float, started_at: str, git_sha: str,
+) -> None:
+    """Sidecar JSON beside ``best.pt`` — same info, human-readable, cheap
+    to grep without ``torch.load``. Rewritten on every best update."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps({
+        "step": step, "epoch": epoch,
+        "val_loss": val_loss, "psnr_dark": psnr_dark,
+        "wall_s": wall_s,
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": started_at,
+        "git_sha": git_sha,
+    }, indent=2))
+    tmp.replace(path)
+
+
 def _load_ckpt(path: Path, model, optimizer, scheduler, device) -> dict:
     state = torch.load(path, map_location=device, weights_only=False)
     model.load_state_dict(state["model"])
@@ -243,11 +336,10 @@ def _restore_rng(state: dict) -> None:
 def evaluate(
     model, val_loader, loss_name: str, device, n_batches: int,
     dark_threshold: float,
-) -> tuple[float, float, dict[str, torch.Tensor] | None]:
-    """Returns (val_loss, psnr_dark, sample_batch_for_pngs)."""
+) -> tuple[float, float]:
+    """Returns (val_loss, psnr_dark) averaged over up to ``n_batches`` val batches."""
     model.eval()
     losses, psnrs = [], []
-    first_batch: dict[str, torch.Tensor] | None = None
     for i, batch in enumerate(val_loader):
         if i >= n_batches:
             break
@@ -258,13 +350,9 @@ def evaluate(
             out["mu"], batch["clean"].to(device),
             peak=255.0, threshold=dark_threshold,
         ))
-        if i == 0:
-            first_batch = {
-                "noisy": batch["noisy"], "clean": batch["clean"], "mu": out["mu"].cpu(),
-            }
     psnrs_finite = [p for p in psnrs if math.isfinite(p)]
     psnr = float(np.mean(psnrs_finite)) if psnrs_finite else float("nan")
-    return float(np.mean(losses)), psnr, first_batch
+    return float(np.mean(losses)), psnr
 
 
 # ----- main loop -------------------------------------------------------------
@@ -318,11 +406,20 @@ def train(cfg: RunConfig) -> None:
     )
 
     # Write config (overwritten each launch; resume reads it from ckpt).
+    started_at = datetime.now(timezone.utc).isoformat()
+    git_sha = _git_sha()
     cfg_dict = asdict(cfg)
-    cfg_dict["git_sha"] = _git_sha()
+    cfg_dict["git_sha"] = git_sha
     cfg_dict["total_steps"] = total_steps
     cfg_dict["steps_per_epoch"] = steps_per_epoch
+    cfg_dict["started_at"] = started_at
     config_path.write_text(json.dumps(cfg_dict, indent=2))
+
+    # Pre-build the showcase batch — varied terrain across mean_dn
+    # percentiles, rendered at α=1.0 so faint texture stays visible.
+    showcase_clean, showcase_noisy, showcase_caps = _build_showcase_batch(
+        Path(cfg.manifest), bundle_path, cfg.val_seed, cfg.n_sample_pngs,
+    )
 
     # Resume.
     start_step, start_epoch, best_val = 0, 0, None
@@ -379,16 +476,17 @@ def train(cfg: RunConfig) -> None:
 
             # Val cadence.
             if step % cfg.val_every_steps == 0:
-                val_loss, psnr, sample_batch = evaluate(
+                val_loss, psnr = evaluate(
                     model, val_loader, cfg.loss, device,
                     n_batches=cfg.val_batches,
                     dark_threshold=cfg.dark_threshold_dn,
                 )
+                wall_s = time.time() - t0
                 with val_jsonl_path.open("a") as f:
                     f.write(json.dumps({
                         "step": step, "epoch": epoch,
                         "val_loss": val_loss, "psnr_dark": psnr,
-                        "wall_s": time.time() - t0,
+                        "wall_s": wall_s,
                     }) + "\n")
                 print(f"  [val]   step {step}  val_loss={val_loss:.4f}  "
                       f"psnr_dark={psnr:.2f} dB")
@@ -398,13 +496,25 @@ def train(cfg: RunConfig) -> None:
                         best_ckpt, model, optimizer, scheduler,
                         step, epoch, best_val, cfg, _capture_rng(),
                     )
-                    print(f"  [val]   new best — saved {best_ckpt.name}")
-                if sample_batch is not None:
-                    _save_sample_pngs(
-                        sample_batch["noisy"], sample_batch["clean"],
-                        sample_batch["mu"], samples_dir, step,
-                        n=cfg.n_sample_pngs,
+                    _save_best_meta(
+                        run_dir / "best.meta.json", step=step, epoch=epoch,
+                        val_loss=val_loss, psnr_dark=psnr,
+                        wall_s=wall_s, started_at=started_at, git_sha=git_sha,
                     )
+                    print(f"  [val]   new best — saved {best_ckpt.name} + best.meta.json")
+                # Showcase samples — same idxs every val cycle, so PNGs
+                # form a comparable time series across the run.
+                with torch.no_grad():
+                    showcase_out = model(showcase_noisy.to(device))
+                _save_sample_pngs(
+                    showcase_noisy, showcase_clean, showcase_out["mu"].cpu(),
+                    samples_dir, step,
+                    n=cfg.n_sample_pngs, captions=showcase_caps,
+                )
+                # Mirror at val cadence too, so a disconnect mid-epoch
+                # still leaves a recent latest.pt on Drive.
+                if cfg.drive_mirror:
+                    _mirror_to_drive(run_dir, Path(cfg.drive_mirror))
                 model.train()
 
         # End-of-epoch always checkpoints + mirrors.
